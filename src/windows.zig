@@ -1,10 +1,15 @@
 const std = @import("std");
 const IOCTL = @import("ioctl.zig").IOCTL;
+const Config = @import("config.zig").Config;
 
 pub const IoctlWindows = struct {
-    pub fn init(ioctl: *IOCTL) void {
+    config: *Config = undefined,
+
+    pub fn init(ioctl: *IOCTL, config: *Config) void {
         ioctl.* = .{
-            .windows = .{},
+            .windows = .{
+                .config = config,
+            },
         };
         return;
     }

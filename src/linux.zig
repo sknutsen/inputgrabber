@@ -5,6 +5,11 @@ const Device = @import("device.zig").Device;
 const IOCTL = @import("ioctl.zig").IOCTL;
 const CommandPayload = @import("ioctl.zig").CommandPayload;
 const CommandType = @import("ioctl.zig").CommandType;
+const Config = @import("config.zig").Config;
+const MsgBlock = @import("message.zig").MsgBlock;
+const mailbox = @import("deps/mailbox/src/mailbox.zig");
+
+const Msgs = mailbox.MailBox(MsgBlock);
 
 const c = @cImport({
     @cInclude("linux/input.h");
@@ -25,27 +30,33 @@ const input_event = extern struct {
 const deviceName = "usb-MOSART_Semi._2.4G_Keyboard_Mouse-event-kbd";
 
 pub const IoctlLinux = struct {
+    const Self = @This();
+
+    config: *Config = undefined,
     device: Device,
     fd: std.fs.File = undefined,
+    msgs: Msgs = undefined,
 
-    pub fn init(ioctl: *IOCTL) void {
+    pub fn init(ioctl: *IOCTL, config: *Config) void {
         ioctl.* = .{
             .linux = .{
+                .config = config,
                 .device = .{
                     .path = &deviceName.*,
                 },
+                .msgs = .{},
             },
         };
 
         return;
     }
 
-    pub fn grab(self: *IoctlLinux) !void {
+    pub fn grab(self: *Self) !void {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const allocator = gpa.allocator();
         defer _ = gpa.deinit();
 
-        const devicePath = try std.fs.path.join(allocator, &.{ consts.kbdDevicePath, self.device.path });
+        const devicePath = try std.fs.path.join(allocator, &.{ consts.kbdDevicePath, self.config.opts.deviceName });
         defer allocator.free(devicePath);
 
         self.fd = try std.fs.openFileAbsolute(devicePath, .{ .mode = .read_only, .lock = .exclusive });
@@ -117,5 +128,9 @@ pub const IoctlLinux = struct {
             consts.KEY_KPDOT => .{ .type = CommandType.Kill, .customCommand = null },
             else => .{ .type = CommandType.PrintInfo, .customCommand = null },
         };
+    }
+
+    pub fn send(self: *Self, msg: MsgBlock) !void {
+        self.msgs.send(msg);
     }
 };

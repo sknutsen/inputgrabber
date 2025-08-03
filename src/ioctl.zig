@@ -2,6 +2,9 @@ const linux = @import("linux.zig").IoctlLinux;
 const macos = @import("macos.zig").IoctlMacos;
 const windows = @import("windows.zig").IoctlWindows;
 const Device = @import("device.zig").Device;
+const Config = @import("config.zig").Config;
+const MsgBlock = @import("message.zig").MsgBlock;
+const Msgs = @import("message.zig").Msgs;
 
 pub const CommandType = enum(u8) {
     Kill,
@@ -17,12 +20,15 @@ pub const CommandPayload = extern struct {
 };
 
 pub const IOCTL = union(enum) {
+    pub var msgs: Msgs = undefined;
+
     linux: linux,
     macos: macos,
     windows: windows,
 
-    pub fn init(self: *IOCTL) void {
-        return linux.init(self);
+    pub fn init(self: *IOCTL, config: *Config) void {
+        self.msgs = .{};
+        return linux.init(self, config);
     }
 
     pub fn toggleGrab(self: *IOCTL) !void {
@@ -54,6 +60,12 @@ pub const IOCTL = union(enum) {
     pub fn getCommand(self: *IOCTL, code: u16) CommandPayload {
         return switch (self.*) {
             inline else => |*i| return i.getCommand(code),
+        };
+    }
+
+    pub fn send(self: *IOCTL, msg: MsgBlock) !void {
+        return switch (self.*) {
+            inline else => |*i| return i.send(msg),
         };
     }
 };
