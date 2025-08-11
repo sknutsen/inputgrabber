@@ -1,6 +1,6 @@
 const std = @import("std");
-const IOCTL = @import("ioctl.zig").IOCTL;
-const Config = @import("config.zig").Config;
+const IOCTL = @import("../ioctl.zig").IOCTL;
+const Config = @import("../config.zig").Config;
 
 pub const IoctlMacos = struct {
     config: *Config = undefined,

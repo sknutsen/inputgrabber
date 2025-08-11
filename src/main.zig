@@ -1,47 +1,50 @@
 const std = @import("std");
 const IOCTL = @import("ioctl.zig").IOCTL;
-const Config = @import("config.zig").Config;
+const config = &@import("config.zig").config;
 const Command = @import("commands.zig").Command;
 const CommandType = @import("commands.zig").CommandType;
-const mailbox = @import("deps/mailbox/src/mailbox.zig");
-const messages = @import("message.zig");
+const state = &@import("state.zig").state;
+const zap = @import("zap");
+
+const runZap = @import("api.zig").runZap;
 
 pub fn main() !void {
-    var config: Config = undefined;
+    try state.init();
+    defer state.deinit();
 
     var alloc_gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = alloc_gpa.deinit();
 
     try config.init(alloc_gpa.allocator(), false);
-    errdefer config.deinit();
+    defer config.deinit();
 
-    try config.loadConfig();
     // try config.writeConfig();
+    try config.loadConfig();
 
-    var ioctl: IOCTL = undefined;
-    ioctl.init(&config);
-
-    var thread: std.Thread = std.Thread.spawn(.{}, ioctlThread, .{ioctl});
+    var thread = try std.Thread.spawn(.{}, ioctlThread, .{});
     defer thread.join();
+
+    try runZap();
 }
 
-fn ioctlThread(ioctl: *IOCTL) void {
+fn ioctlThread() !void {
+    var ioctl: IOCTL = undefined;
+    ioctl.init(config);
+
     try ioctl.grab();
 
     defer {
-        std.debug.print("Cleaning up...", .{});
+        std.debug.print("Cleaning up...\n", .{});
         ioctl.ungrab();
+        state.running = false;
     }
 
-    while (true) {
-        const envolope = ioctl.msgs.receive(10000000);
-        switch (envolope) {
-            .Closed => break,
-            else => {},
+    while (state.isRunning()) {
+        if (state.configHasChanged()) {
+            try config.loadConfig();
+            state.configChanged = false;
         }
-        if (envolope) |_| {
-            break;
-        }
+
         try ioctl.processInput();
     }
 }

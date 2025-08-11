@@ -1,3 +1,5 @@
+pub var config: Config = undefined;
+
 pub const Config = @This();
 
 const std = @import("std");
@@ -25,6 +27,7 @@ pub fn init(self: *Config, alloc_gpa: Allocator, setDefaults: bool) !void {
         .isInitialized = true,
         ._arena = ArenaAllocator.init(alloc_gpa),
     };
+    errdefer self.deinit();
 
     const allocator = self._arena.?.allocator();
 
@@ -76,7 +79,7 @@ pub fn loadConfig(self: *Config) !void {
     const file = try openFile(filePath, .{ .mode = std.fs.File.OpenMode.read_only });
     defer file.close();
 
-    var contents: [1024]u8 = undefined;
+    var contents: [@sizeOf(Config)]u8 = undefined;
     const bytesRead = try file.readAll(&contents);
 
     print("contents: {s}\n", .{contents});

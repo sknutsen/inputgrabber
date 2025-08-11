@@ -5,6 +5,7 @@ pub const CommandType = enum(u8) {
     grab,
     ungrab,
     exitProcess,
+    print,
 };
 
 pub const Command = struct {

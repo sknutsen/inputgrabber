@@ -1,33 +1,21 @@
-const linux = @import("linux.zig").IoctlLinux;
-const macos = @import("macos.zig").IoctlMacos;
-const windows = @import("windows.zig").IoctlWindows;
-const Device = @import("device.zig").Device;
+const linux = @import("ioctl/linux.zig").IoctlLinux;
+const macos = @import("ioctl/macos.zig").IoctlMacos;
+const windows = @import("ioctl/windows.zig").IoctlWindows;
+const Device = @import("ioctl/device.zig").Device;
 const Config = @import("config.zig").Config;
-const MsgBlock = @import("message.zig").MsgBlock;
-const Msgs = @import("message.zig").Msgs;
+pub const CommandType = @import("commands.zig").CommandType;
 
-pub const CommandType = enum(u8) {
-    Kill,
-    PrintInfo,
-    Custom,
-};
-
-pub const CustomCommand = *const fn () void;
-
-pub const CommandPayload = extern struct {
+pub const CommandPayload = struct {
     type: CommandType,
-    customCommand: ?CustomCommand,
+    customCommand: ?[]u8,
 };
 
 pub const IOCTL = union(enum) {
-    pub var msgs: Msgs = undefined;
-
     linux: linux,
     macos: macos,
     windows: windows,
 
     pub fn init(self: *IOCTL, config: *Config) void {
-        self.msgs = .{};
         return linux.init(self, config);
     }
 
@@ -63,9 +51,9 @@ pub const IOCTL = union(enum) {
         };
     }
 
-    pub fn send(self: *IOCTL, msg: MsgBlock) !void {
+    pub fn send(self: *IOCTL) !void {
         return switch (self.*) {
-            inline else => |*i| return i.send(msg),
+            inline else => |*i| return i.send(),
         };
     }
 };
