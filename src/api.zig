@@ -3,16 +3,29 @@ const zap = @import("zap");
 
 const state = &@import("state.zig").state;
 
-const configCmd = @import("api/configCmd.zig");
-const stateCmd = @import("api/stateCmd.zig");
+const ConfigCmd = @import("api/configCmd.zig");
+const StateCmd = @import("api/stateCmd.zig");
 
-pub fn runZap() !void {
-    var listener = zap.HttpListener.init(.{
+pub fn runZap(allocator: std.mem.Allocator) !void {
+    var listener = zap.Endpoint.Listener.init(allocator, .{
         .port = 3000,
         .on_request = on_request,
+        .on_error = on_error,
         .log = true,
         .max_clients = 100000,
+        .max_body_size = 100 * 1024 * 1024,
     });
+    defer listener.deinit();
+
+    var cfg = try ConfigCmd.init(allocator, "/config");
+    defer cfg.deinit();
+
+    var stateCmd = try StateCmd.init(allocator, "/state");
+    defer stateCmd.deinit();
+
+    try listener.register(&cfg);
+    try listener.register(&stateCmd);
+
     try listener.listen();
 
     std.debug.print("Listening on 0.0.0.0:3000\n", .{});
@@ -36,8 +49,13 @@ fn on_request(r: zap.Request) !void {
         if (std.mem.eql(u8, the_path, "/stop")) {
             state.running = false;
             try r.sendBody("<html><body><h1>stopping...</h1></body></html>");
+            zap.stop();
             return;
         }
     }
-    try r.sendBody("<html><body><h1>hello from zap!!!</h1></body></html>");
+}
+
+// this is just to demo that we could catch arbitrary errors as fallback
+fn on_error(_: zap.Request, err: anyerror) void {
+    std.debug.print("\n\n\nOh no!!! We didn't chatch this error: {}\n\n\n", .{err});
 }

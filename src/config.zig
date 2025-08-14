@@ -67,31 +67,31 @@ pub fn init(self: *Config, alloc_gpa: Allocator, setDefaults: bool) !void {
 
 pub fn deinit(self: *Config) void {
     if (self._arena) |arena| arena.deinit();
-    self.* = undefined;
 }
 
 pub fn loadConfig(self: *Config) !void {
-    errdefer self.deinit();
-
     const filePath = try self.getFilePath(self._arena.?.allocator());
 
     print("{s}\n", .{filePath});
     const file = try openFile(filePath, .{ .mode = std.fs.File.OpenMode.read_only });
     defer file.close();
 
-    var contents: [@sizeOf(Config)]u8 = undefined;
-    const bytesRead = try file.readAll(&contents);
+    // var contents: [@sizeOf(Config)]u8 = undefined;
+    const contents = try file.readToEndAlloc(self._arena.?.allocator(), @sizeOf(Config));
 
+    try loadConfigFromJson(self, contents);
+}
+
+pub fn loadConfigFromJson(self: *Config, contents: []const u8) !void {
     print("contents: {s}\n", .{contents});
-    const parsed1 = try std.json.parseFromSlice(Value, self._arena.?.allocator(), contents[0..bytesRead], .{});
-    defer parsed1.deinit();
+    const parsed1 = try std.json.parseFromSlice(Options, self._arena.?.allocator(), contents, .{});
+    // defer parsed1.deinit();
+    self.*.opts = parsed1.value;
 
-    self.*.opts = try parseFromValue(Options, self._arena.?.allocator(), parsed1.value, .{ .allocate = .alloc_always });
+    // self.*.opts = try parseFromValue(Options, self._arena.?.allocator(), parsed1.value, .{ .allocate = .alloc_always });
 }
 
 pub fn writeConfig(self: *Config) !void {
-    errdefer self.deinit();
-
     const filePath = try self.getFilePath(self._arena.?.allocator());
 
     const file = try openFile(filePath, .{ .mode = std.fs.File.OpenMode.write_only });
@@ -125,11 +125,12 @@ pub const Options = struct {
     deviceName: []const u8,
     mqtt: []const u8,
     clientName: []const u8,
-    keyMaps: std.ArrayList(KeyMap) = undefined,
+    keyMaps: ArrayListJson(KeyMap) = undefined,
 
     pub fn getDefaultOpts(alloc: Allocator) !Options {
-        var keyMap = std.ArrayList(KeyMap).init(alloc);
-        try keyMap.append(KeyMap{ .key = Key.key1, .args = std.ArrayList([]const u8).init(alloc), .type = 0 });
+        var keyMap = ArrayListJson(KeyMap).init(alloc);
+        errdefer keyMap.inner.deinit();
+        try keyMap.inner.append(KeyMap{ .key = Key.key1, .args = ArrayListJson([]const u8).init(alloc), .type = 0 });
 
         return .{
             .deviceName = "test",
@@ -138,101 +139,173 @@ pub const Options = struct {
             .keyMaps = keyMap,
         };
     }
-
-    pub fn jsonParseFromValue(allocator: Allocator, source: Value, options: ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;
-
-        var keyMaps: std.ArrayList(KeyMap) = undefined;
-        if (source.object.get("keyMaps")) |val| {
-            const slice = try innerParseFromValue([]const KeyMap, allocator, val, .{});
-            keyMaps = std.ArrayList(KeyMap).init(allocator);
-            for (slice) |km| {
-                try keyMaps.append(km);
-            }
-        } else {
-            keyMaps = std.ArrayList(KeyMap).init(allocator);
-        }
-        errdefer keyMaps.deinit();
-
-        return Options{
-            .deviceName = innerParseFromValue([]const u8, allocator, source.object.get("deviceName").?, options) catch "",
-            .mqtt = innerParseFromValue([]const u8, allocator, source.object.get("mqtt").?, options) catch "",
-            .clientName = innerParseFromValue([]const u8, allocator, source.object.get("clientName").?, options) catch "",
-            .keyMaps = keyMaps,
-        };
-    }
-
-    pub fn jsonStringify(self: Options, jw: anytype) !void {
-        try jw.beginObject();
-
-        // Fields
-        try jw.objectField("deviceName");
-        try jw.print("\"{s}\"", .{self.deviceName});
-
-        try jw.objectField("clientName");
-        try jw.print("\"{s}\"", .{self.clientName});
-
-        try jw.objectField("mqtt");
-        try jw.print("\"{s}\"", .{self.mqtt});
-
-        // KeyMaps
-        try jw.objectField("keyMaps");
-        try jw.beginArray();
-        for (self.keyMaps.items) |k| {
-            try jw.write(k);
-        }
-        try jw.endArray();
-        try jw.endObject();
-    }
 };
 
 pub const KeyMap = struct {
     key: Key,
-    args: std.ArrayList([]const u8) = undefined,
+    args: ArrayListJson([]const u8) = undefined,
     type: u8,
-
-    pub fn jsonParseFromValue(allocator: Allocator, source: Value, options: ParseOptions) !@This() {
-        if (source != .object) return error.UnexpectedToken;
-
-        var args: std.ArrayList([]const u8) = undefined;
-        if (source.object.get("args")) |val| {
-            const slice = try innerParseFromValue([][]const u8, allocator, val, .{});
-            args = std.ArrayList([]const u8).init(allocator);
-            for (slice) |str| {
-                try args.append(str);
-            }
-        } else {
-            args = std.ArrayList([]const u8).init(allocator);
-        }
-        errdefer args.deinit();
-
-        return KeyMap{
-            .key = try innerParseFromValue(Key, allocator, source.object.get("key").?, options),
-            .type = innerParseFromValue(u8, allocator, source.object.get("type").?, options) catch 0,
-            .args = args,
-        };
-    }
-
-    pub fn jsonStringify(self: KeyMap, jw: anytype) !void {
-        try jw.beginObject();
-
-        // Fields
-        try jw.objectField("key");
-        try jw.write(self.key);
-
-        try jw.objectField("type");
-        try jw.write(self.type);
-
-        // KeyMaps
-        try jw.objectField("args");
-        try jw.beginArray();
-        for (self.args.items) |a| {
-            try jw.write(a);
-        }
-        try jw.endArray();
-        try jw.endObject();
-    }
 };
+
+fn ArrayListJson(T: type) type {
+    return struct {
+        inner: std.ArrayList(T),
+
+        pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
+            var list = std.ArrayList(T).init(allocator);
+            errdefer list.deinit();
+
+            if (try source.next() != .array_begin) {
+                return error.UnexpectedToken;
+            }
+
+            while (true) {
+                const token = try source.nextAlloc(allocator, options.allocate.?);
+                switch (token) {
+                    inline .string, .allocated_string => |s| {
+                        const val = try std.json.parseFromSlice(T, allocator, s, options);
+                        try list.append(val.value);
+                    },
+
+                    .array_end => break,
+                    else => {
+                        std.debug.print("reached unreachable with token {s}\n", .{@tagName(token)});
+                        unreachable;
+                    },
+                }
+            }
+
+            return .{ .inner = list };
+        }
+
+        pub fn jsonStringify(self: ArrayListJson(T), jw: anytype) !void {
+            try jw.beginArray();
+            for (self.inner.items) |k| {
+                try jw.write(k);
+            }
+            try jw.endArray();
+        }
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            const list = std.ArrayList(T).init(allocator);
+
+            return .{ .inner = list };
+        }
+    };
+}
+
+// pub const Options = struct {
+//     deviceName: []const u8,
+//     mqtt: []const u8,
+//     clientName: []const u8,
+//     keyMaps: std.ArrayList(KeyMap) = undefined,
+//
+//     pub fn getDefaultOpts(alloc: Allocator) !Options {
+//         var keyMap = std.ArrayList(KeyMap).init(alloc);
+//         try keyMap.append(KeyMap{ .key = Key.key1, .args = std.ArrayList([]const u8).init(alloc), .type = 0 });
+//
+//         return .{
+//             .deviceName = "test",
+//             .clientName = "inputgrabber",
+//             .mqtt = "localhost",
+//             .keyMaps = keyMap,
+//         };
+//     }
+//
+//     pub fn jsonParseFromValue(allocator: Allocator, source: Value, options: ParseOptions) !@This() {
+//         if (source != .object) return error.UnexpectedToken;
+//
+//         var keyMaps: std.ArrayList(KeyMap) = undefined;
+//         if (source.object.get("keyMaps")) |val| {
+//             const slice = try innerParseFromValue([]const KeyMap, allocator, val, .{});
+//             keyMaps = std.ArrayList(KeyMap).init(allocator);
+//             for (slice) |km| {
+//                 try keyMaps.append(km);
+//             }
+//         } else {
+//             keyMaps = std.ArrayList(KeyMap).init(allocator);
+//         }
+//         errdefer keyMaps.deinit();
+//
+//         return Options{
+//             .deviceName = innerParseFromValue([]const u8, allocator, source.object.get("deviceName").?, options) catch "",
+//             .mqtt = innerParseFromValue([]const u8, allocator, source.object.get("mqtt").?, options) catch "",
+//             .clientName = innerParseFromValue([]const u8, allocator, source.object.get("clientName").?, options) catch "",
+//             .keyMaps = keyMaps,
+//         };
+//     }
+//
+//     pub fn jsonStringify(self: *Options, jw: anytype) !void {
+//         try jw.beginObject();
+//
+//         // Fields
+//         try jw.objectField("deviceName");
+//         try jw.print("\"{s}\"", .{self.deviceName});
+//
+//         try jw.objectField("clientName");
+//         try jw.print("\"{s}\"", .{self.clientName});
+//
+//         try jw.objectField("mqtt");
+//         try jw.print("\"{s}\"", .{self.mqtt});
+//
+//         // KeyMaps
+//         try jw.objectField("keyMaps");
+//         try jw.beginArray();
+//         for (self.keyMaps.items) |k| {
+//             try jw.write(k);
+//         }
+//         try jw.endArray();
+//         try jw.endObject();
+//     }
+// };
+
+// pub const KeyMap = struct {
+//     key: Key,
+//     args: std.ArrayList([]const u8) = undefined,
+//     type: u8,
+//
+//     pub fn jsonParseFromValue(allocator: Allocator, source: Value, options: ParseOptions) !@This() {
+//         if (source != .object) return error.UnexpectedToken;
+//
+//         var args: std.ArrayList([]const u8) = undefined;
+//         if (source.object.get("args")) |val| {
+//             const slice = try innerParseFromValue([][]const u8, allocator, val, .{});
+//             args = std.ArrayList([]const u8).init(allocator);
+//             for (slice) |str| {
+//                 try args.append(str);
+//             }
+//         } else {
+//             args = std.ArrayList([]const u8).init(allocator);
+//         }
+//         errdefer args.deinit();
+//
+//         return KeyMap{
+//             .key = try innerParseFromValue(Key, allocator, source.object.get("key").?, options),
+//             .type = innerParseFromValue(u8, allocator, source.object.get("type").?, options) catch 0,
+//             .args = args,
+//         };
+//     }
+//
+//     pub fn jsonStringify(self: *KeyMap, jw: anytype) !void {
+//         try jw.beginObject();
+//
+//         // Fields
+//         try jw.objectField("key");
+//         try jw.write(self.key);
+//
+//         try jw.objectField("type");
+//         try jw.write(self.type);
+//
+//         // KeyMaps
+//         try jw.objectField("args");
+//         try jw.beginArray();
+//         for (self.args.items) |a| {
+//             try jw.write(a);
+//         }
+//         try jw.endArray();
+//         try jw.endObject();
+//     }
+// };
 
 pub const Key = enum(u8) {
     key1,

@@ -24,7 +24,7 @@ pub fn main() !void {
     var thread = try std.Thread.spawn(.{}, ioctlThread, .{});
     defer thread.join();
 
-    try runZap();
+    try runZap(alloc_gpa.allocator());
 }
 
 fn ioctlThread() !void {
