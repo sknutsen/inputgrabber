@@ -18,7 +18,6 @@ pub fn main() !void {
     try config.init(alloc_gpa.allocator(), false);
     defer config.deinit();
 
-    // try config.writeConfig();
     try config.loadConfig();
 
     var thread = try std.Thread.spawn(.{}, ioctlThread, .{});
